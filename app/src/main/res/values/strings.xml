@@ -45,6 +45,10 @@
     <string name="pref_auto_rotation_summary">Decide which orientation mpv will play landscape / portrait videos in</string>
     <string name="pref_auto_rotation_default">auto</string>
 
+    <string name="pref_ytdl_format_title">Youtube-dl formats</string>
+    <string name="pref_ytdl_format_hint">Format string passed to youtube-dl for quality/format selection. Read the ytdl documentation on these before changing this.</string>
+    <string name="pref_ytdl_format_summary">%s</string>
+
 
     <string name="pref_header_video">Video</string>
 
