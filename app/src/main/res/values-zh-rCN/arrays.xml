@@ -9,6 +9,7 @@
         <item>自动</item>
         <item>默认横屏</item>
         <item>默认竖屏</item>
+        <item>Device</item> <!-- TODO -->
     </string-array>
     <string-array name="deband_entries">
         <item>禁用</item>
@@ -21,5 +22,6 @@
         <item>本地：仅FPS</item>
         <item>stats.lua：常规</item>
         <item>stats.lua：计时</item>
+        <item>stats.lua：Cache</item> <!-- TODO -->
     </string-array>
 </resources>

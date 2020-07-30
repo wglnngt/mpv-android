@@ -11,10 +11,11 @@ if [ "$os" == "linux" ]; then
 	hash yum &> /dev/null && sudo yum install zlib.i686 ncurses-libs.i686 bzip2-libs.i686 \
 		autoconf m4 pkgconfig libtool
 	apt-get -v &> /dev/null && [ $TRAVIS -eq 0 ] && \
-		sudo apt-get install lib32z1 lib32ncurses5 lib32stdc++6 autoconf m4 pkg-config libtool
+		sudo apt-get install autoconf pkg-config libtool ninja-build python3-pip python3-setuptools && \
+		sudo pip3 install meson
 
 	os_ndk="linux"
-elif [ "$os" == "macosx" ]; then
+elif [ "$os" == "mac" ]; then
 	if ! hash brew 2>/dev/null; then
 		echo "Error: brew not found. You need to install Homebrew: https://brew.sh/"
 		exit 255
@@ -35,14 +36,13 @@ fi
 mkdir -p sdk && cd sdk
 
 # android-sdk-$os
-if [ $TRAVIS -eq 0 ]; then
-	$WGET "https://dl.google.com/android/repository/sdk-tools-${os_ndk}-${v_sdk}.zip"
-	mkdir "android-sdk-${os}"
-	unzip -q -d "android-sdk-${os}" "sdk-tools-${os_ndk}-${v_sdk}.zip"
-	rm "sdk-tools-${os_ndk}-${v_sdk}.zip"
-	"./android-sdk-${os}/tools/bin/sdkmanager" \
-		"platforms;android-27" "build-tools;${v_sdk_build_tools}" "extras;android;m2repository" "platform-tools"
-fi
+$WGET "https://dl.google.com/android/repository/commandlinetools-${os}-${v_sdk}.zip"
+mkdir "android-sdk-${os}"
+unzip -q -d "android-sdk-${os}" "commandlinetools-${os}-${v_sdk}.zip"
+rm "commandlinetools-${os}-${v_sdk}.zip"
+echo y | "./android-sdk-${os}/tools/bin/sdkmanager" "--sdk_root=${ANDROID_HOME}" \
+	"platforms;android-28" "build-tools;${v_sdk_build_tools}" \
+	"extras;android;m2repository" "platform-tools"
 
 # android-ndk-$v_ndk
 $WGET "http://dl.google.com/android/repository/android-ndk-${v_ndk}-${os_ndk}-x86_64.zip"
@@ -51,7 +51,7 @@ rm "android-ndk-${v_ndk}-${os_ndk}-x86_64.zip"
 
 # gas-preprocessor
 mkdir -p bin
-$WGET "https://git.libav.org/?p=gas-preprocessor.git;a=blob_plain;f=gas-preprocessor.pl;hb=HEAD" \
+$WGET "https://github.com/FFmpeg/gas-preprocessor/raw/master/gas-preprocessor.pl" \
 	-O bin/gas-preprocessor.pl
 chmod +x bin/gas-preprocessor.pl
 

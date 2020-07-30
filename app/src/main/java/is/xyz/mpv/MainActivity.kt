@@ -3,19 +3,17 @@ package `is`.xyz.mpv
 import android.app.AlertDialog
 import android.content.Intent
 import android.os.Bundle
-import android.os.Environment.getExternalStorageDirectory
 import android.preference.PreferenceManager
 import androidx.appcompat.app.AppCompatActivity
 import android.text.InputType
 import android.view.Menu
 import android.view.MenuItem
 import android.widget.EditText
+import android.os.Build
+import android.os.Environment
+import android.util.Log
 
 import `is`.xyz.filepicker.AbstractFilePickerFragment
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.content.Context
-import android.os.Build
 
 import java.io.File
 
@@ -28,19 +26,31 @@ class MainActivity : AppCompatActivity(), AbstractFilePickerFragment.OnFilePicke
         setContentView(R.layout.activity_main)
         fragment = supportFragmentManager.findFragmentById(R.id.file_picker_fragment) as MPVFilePickerFragment
 
-        val sharedPreferences = PreferenceManager.getDefaultSharedPreferences(this.applicationContext)
-        val path = sharedPreferences.getString("default_file_manager_path",
-                getExternalStorageDirectory().path)
-        (fragment as MPVFilePickerFragment).goToDir(File(path))
+        // TODO: rework or remove this setting
+        val sharedPrefs = PreferenceManager.getDefaultSharedPreferences(this)
+        val defaultPath = sharedPrefs.getString("default_file_manager_path",
+                Environment.getExternalStorageDirectory().path)
 
-        // this has absolutely no relation to the file picker, but we need to do it *somewhere*
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val name = getString(R.string.pref_background_play_title)
-            val ch = NotificationChannel(
-                    BackgroundPlaybackService.NOTIFICATION_CHANNEL_ID,
-                    name, NotificationManager.IMPORTANCE_MIN)
-            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            notificationManager.createNotificationChannel(ch)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            // check that the preferred path is inside a storage volume
+            val vols = Utils.getStorageVolumes(this)
+            val vol = vols.find { File(defaultPath).startsWith(it.path) }
+            if (vol == null) {
+                // looks like it wasn't
+                Log.w(TAG, "default path set to $defaultPath but no such storage volume")
+                with (fragment as MPVFilePickerFragment) {
+                    root = vols.first().path
+                    goToDir(vols.first().path)
+                }
+            } else {
+                with (fragment as MPVFilePickerFragment) {
+                    root = vol.path
+                    goToDir(File(defaultPath))
+                }
+            }
+        } else {
+            // Old device: go to preferred path but don't restrict root
+            (fragment as MPVFilePickerFragment).goToDir(File(defaultPath))
         }
     }
 
@@ -52,22 +62,43 @@ class MainActivity : AppCompatActivity(), AbstractFilePickerFragment.OnFilePicke
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
         val id = item.itemId
 
-        if (id == R.id.action_open_url) {
+        if (id == R.id.action_external_storage) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
+                val path = Environment.getExternalStorageDirectory()
+                (fragment as MPVFilePickerFragment).goToDir(path) // do something
+                return true
+            }
+
+            val vols = Utils.getStorageVolumes(this)
+
+            with (AlertDialog.Builder(this)) {
+                setItems(vols.map { it.description }.toTypedArray()) { dialog, item ->
+                    val vol = vols[item]
+                    with (fragment as MPVFilePickerFragment) {
+                        root = vol.path
+                        goToDir(vol.path)
+                    }
+                    dialog.dismiss()
+                }
+                show()
+            }
+            return true
+        } else if (id == R.id.action_open_url) {
             // https://stackoverflow.com/questions/10903754/#answer-10904665
-            val builder = AlertDialog.Builder(this)
-            builder.setTitle(R.string.action_open_url)
-
             val input = EditText(this)
-            input.inputType = InputType.TYPE_CLASS_TEXT
-            builder.setView(input)
+            input.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
 
-            builder.setPositiveButton(R.string.dialog_ok) {
-                dialog, _ -> playFile(input.text.toString())
+            with (AlertDialog.Builder(this)) {
+                setTitle(R.string.action_open_url)
+                setView(input)
+                setPositiveButton(R.string.dialog_ok) { dialog, _ ->
+                    playFile(input.text.toString())
+                }
+                setNegativeButton(R.string.dialog_cancel) { dialog, _ ->
+                    dialog.cancel()
+                }
+                show()
             }
-            builder.setNegativeButton(R.string.dialog_cancel) {
-                dialog, _ -> dialog.cancel()
-            }
-            builder.show()
         } else if (id == R.id.action_settings) {
             val i = Intent(this, SettingsActivity::class.java)
             startActivity(i)

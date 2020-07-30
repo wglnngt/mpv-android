@@ -1,16 +1,16 @@
 package `is`.xyz.mpv
 
 import android.content.Context
-import android.media.AudioTrack
-import android.media.AudioManager
 import android.util.AttributeSet
 import android.util.Log
 
 import `is`.xyz.mpv.MPVLib.mpvFormat.*
 import android.annotation.SuppressLint
 import android.os.Build
+import android.os.Environment
 import android.preference.PreferenceManager
 import android.view.*
+import kotlin.math.abs
 import kotlin.reflect.KProperty
 
 internal class MPVView(context: Context, attrs: AttributeSet) : SurfaceView(context, attrs), SurfaceHolder.Callback {
@@ -19,11 +19,10 @@ internal class MPVView(context: Context, attrs: AttributeSet) : SurfaceView(cont
         MPVLib.create(this.context)
         MPVLib.setOptionString("config", "yes")
         MPVLib.setOptionString("config-dir", configDir)
+        initOptions() // do this before init() so user-supplied config can override our choices
         MPVLib.init()
-        initOptions()
         observeProperties()
     }
-
 
     @SuppressLint("NewApi")
     private fun initOptions() {
@@ -45,18 +44,11 @@ internal class MPVView(context: Context, attrs: AttributeSet) : SurfaceView(cont
             val refreshRate = disp.mode.refreshRate
 
             Log.v(TAG, "Display ${disp.displayId} reports FPS of $refreshRate")
-            MPVLib.setOptionString("display-fps", refreshRate.toString())
+            MPVLib.setOptionString("override-display-fps", refreshRate.toString())
         } else {
             Log.v(TAG, "Android version too old, disabling refresh rate functionality " +
                        "(${Build.VERSION.SDK_INT} < ${Build.VERSION_CODES.M})")
         }
-
-        // ao: set optimal sample rate for opensles, to get better audio playback
-        val sampleRate = AudioTrack.getNativeOutputSampleRate(AudioManager.STREAM_MUSIC)
-        Log.v(TAG, "Device reports optimal sample rate $sampleRate")
-
-        // TODO: better be optional as it may not be ideal if the user switches audio device during playback.
-        MPVLib.setOptionString("audio-samplerate", sampleRate.toString())
 
         // set non-complex options
 
@@ -84,6 +76,8 @@ internal class MPVView(context: Context, attrs: AttributeSet) : SurfaceView(cont
                 MPVLib.setOptionString(mpv_option, preference)
         }
 
+        // set more options
+
         val debandMode = sharedPreferences.getString("video_debanding", "")
         if (debandMode == "gradfun") {
             // lower the default radius (16) to improve performance
@@ -95,11 +89,8 @@ internal class MPVView(context: Context, attrs: AttributeSet) : SurfaceView(cont
         val vidsync = sharedPreferences.getString("video_sync", resources.getString(R.string.pref_video_interpolation_sync_default))
         MPVLib.setOptionString("video-sync", vidsync)
 
-        if (sharedPreferences.getBoolean("video_interpolation", false)) {
-            if (!vidsync.startsWith("display-"))
-                Log.e(TAG, "Interpolation enabled but video-sync not set to a 'display' mode, this won't work!")
+        if (sharedPreferences.getBoolean("video_interpolation", false))
             MPVLib.setOptionString("interpolation", "yes")
-        }
 
         if (sharedPreferences.getBoolean("gpudebug", false))
             MPVLib.setOptionString("gpu-debug", "yes")
@@ -109,13 +100,11 @@ internal class MPVView(context: Context, attrs: AttributeSet) : SurfaceView(cont
             MPVLib.setOptionString("vd-lavc-skiploopfilter", "nonkey")
         }
 
-        // set options
-
         MPVLib.setOptionString("vo", "gpu")
         MPVLib.setOptionString("gpu-context", "android")
         MPVLib.setOptionString("hwdec", hwdec)
         MPVLib.setOptionString("hwdec-codecs", "h264,hevc,mpeg4,mpeg2video,vp8,vp9")
-        MPVLib.setOptionString("ao", "opensles")
+        MPVLib.setOptionString("ao", "audiotrack,opensles")
         MPVLib.setOptionString("tls-verify", "yes")
         MPVLib.setOptionString("tls-ca-file", "${this.context.filesDir.path}/cacert.pem")
         MPVLib.setOptionString("input-default-bindings", "yes")
@@ -123,6 +112,9 @@ internal class MPVView(context: Context, attrs: AttributeSet) : SurfaceView(cont
         MPVLib.setOptionString("demuxer-max-bytes", "${32 * 1024 * 1024}")
         MPVLib.setOptionString("demuxer-max-back-bytes", "${32 * 1024 * 1024}")
         MPVLib.setOptionString("save-position-on-quit", "no") // done manually by MPVActivity
+        val screenshotDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
+        screenshotDir.mkdirs()
+        MPVLib.setOptionString("screenshot-directory", screenshotDir.path)
     }
 
     fun playFile(filePath: String) {
@@ -150,6 +142,20 @@ internal class MPVView(context: Context, attrs: AttributeSet) : SurfaceView(cont
         holder.removeCallback(this)
 
         MPVLib.destroy()
+    }
+
+    fun onPointerEvent(event: MotionEvent): Boolean {
+        assert (event.isFromSource(InputDevice.SOURCE_CLASS_POINTER))
+        if (event.actionMasked == MotionEvent.ACTION_SCROLL) {
+            val h = event.getAxisValue(MotionEvent.AXIS_HSCROLL)
+            val v = event.getAxisValue(MotionEvent.AXIS_VSCROLL)
+            if (abs(h) > 0)
+                MPVLib.command(arrayOf("keypress", if (h < 0) "WHEEL_LEFT" else "WHEEL_RIGHT"))
+            if (abs(v) > 0)
+                MPVLib.command(arrayOf("keypress", if (v < 0) "WHEEL_DOWN" else "WHEEL_UP"))
+            return true
+        }
+        return false
     }
 
     fun onKey(event: KeyEvent): Boolean {
@@ -190,23 +196,30 @@ internal class MPVView(context: Context, attrs: AttributeSet) : SurfaceView(cont
     }
 
     private fun observeProperties() {
+        // This observes all properties needed by MPVView or MPVActivity
         data class Property(val name: String, val format: Int)
         val p = arrayOf(
                 Property("time-pos", MPV_FORMAT_INT64),
                 Property("duration", MPV_FORMAT_INT64),
                 Property("pause", MPV_FORMAT_FLAG),
                 Property("track-list", MPV_FORMAT_NONE),
-                Property("video-params", MPV_FORMAT_NONE)
+                Property("video-params", MPV_FORMAT_NONE),
+                Property("playlist-pos", MPV_FORMAT_NONE),
+                Property("playlist-count", MPV_FORMAT_NONE),
+                Property("video-format", MPV_FORMAT_NONE),
+                Property("media-title", MPV_FORMAT_STRING),
+                Property("metadata/by-key/Artist", MPV_FORMAT_STRING),
+                Property("metadata/by-key/Album", MPV_FORMAT_STRING)
         )
 
         for ((name, format) in p)
             MPVLib.observeProperty(name, format)
     }
 
-    fun addObserver(o: EventObserver) {
+    fun addObserver(o: MPVLib.EventObserver) {
         MPVLib.addObserver(o)
     }
-    fun removeObserver(o: EventObserver) {
+    fun removeObserver(o: MPVLib.EventObserver) {
         MPVLib.removeObserver(o)
     }
 
@@ -223,14 +236,16 @@ internal class MPVView(context: Context, attrs: AttributeSet) : SurfaceView(cont
             tracks.getValue(type).add(Track(-1, "None"))
         }
         val count = MPVLib.getPropertyInt("track-list/count")!!
+        // Note that because events are async, properties might disappear at any moment
+        // so use ?: continue instead of !!
         for (i in 0 until count) {
-            val type = MPVLib.getPropertyString("track-list/$i/type")!!
+            val type = MPVLib.getPropertyString("track-list/$i/type") ?: continue
             if (!tracks.containsKey(type)) {
                 Log.w(TAG, "Got unknown track type: $type")
                 continue
             }
             val lang = MPVLib.getPropertyString("track-list/$i/lang") ?: "unk"
-            val mpvId = MPVLib.getPropertyInt("track-list/$i/id")!!
+            val mpvId = MPVLib.getPropertyInt("track-list/$i/id") ?: continue
             val track = Track(
                     mpvId=mpvId,
                     name="#$mpvId: $lang"
@@ -245,8 +260,8 @@ internal class MPVView(context: Context, attrs: AttributeSet) : SurfaceView(cont
         val playlist: MutableList<PlaylistFile> = mutableListOf()
         val count = MPVLib.getPropertyInt("playlist-count")!!
         for (i in 0 until count) {
-            val filename = MPVLib.getPropertyString("playlist/$i/filename")!!
-                    .replaceBeforeLast('/', "").trimStart('/')
+            val filename = Utils.fileBasename(
+                    MPVLib.getPropertyString("playlist/$i/filename")!!)
             val title = MPVLib.getPropertyString("playlist/$i/title")
             playlist.add(PlaylistFile(
                     index=i,
@@ -290,17 +305,20 @@ internal class MPVView(context: Context, attrs: AttributeSet) : SurfaceView(cont
     val frameDropCount: Int?
         get() = MPVLib.getPropertyInt("frame-drop-count")
 
-    val fps: String?
-        get() = MPVLib.getPropertyString("fps")
+    val containerFps: Double?
+        get() = MPVLib.getPropertyDouble("container-fps")
 
-    val estimatedVfFps: String?
-        get() = MPVLib.getPropertyString("estimated-vf-fps")
+    val estimatedVfFps: Double?
+        get() = MPVLib.getPropertyDouble("estimated-vf-fps")
 
     val videoW: Int?
         get() = MPVLib.getPropertyInt("video-params/w")
 
     val videoH: Int?
         get() = MPVLib.getPropertyInt("video-params/h")
+
+    val videoRotation: Int?
+        get() = MPVLib.getPropertyInt("video-params/rotate")
 
     val videoCodec: String?
         get() = MPVLib.getPropertyString("video-codec")
@@ -313,6 +331,9 @@ internal class MPVView(context: Context, attrs: AttributeSet) : SurfaceView(cont
 
     val audioChannels: Int?
         get() = MPVLib.getPropertyInt("audio-params/channel-count")
+
+    val vid: Int
+        get() = MPVLib.getPropertyString("vid")?.toIntOrNull() ?: -1
 
     class TrackDelegate {
         operator fun getValue(thisRef: Any?, property: KProperty<*>): Int {
@@ -339,15 +360,17 @@ internal class MPVView(context: Context, attrs: AttributeSet) : SurfaceView(cont
     fun cycleHwdec() = MPVLib.setPropertyString("hwdec", if (hwdecActive!!) "no" else "mediacodec-copy")
 
     fun cycleSpeed() {
-        val speeds = arrayOf(0.1, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0)
-        playbackSpeed = speeds[(speeds.indexOf(playbackSpeed) + 1) % speeds.size]
+        val speeds = arrayOf(0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0)
+        val currentSpeed = playbackSpeed ?: 1.0
+        val index = speeds.indexOfFirst { it > currentSpeed }
+        playbackSpeed = speeds[if (index == -1) 0 else index]
     }
+
+    // Surface callbacks
 
     override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
         MPVLib.setPropertyString("android-surface-size", "${width}x$height")
     }
-
-    // Surface callbacks
 
     override fun surfaceCreated(holder: SurfaceHolder) {
         Log.w(TAG, "Creating libmpv Surface")

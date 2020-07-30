@@ -1,21 +1,29 @@
-language: android
-dist: trusty
-sudo: false
+language: generic
+os: linux
+dist: bionic
 notifications:
   email: false
 
-android:
-  components:
-    - build-tools-28.0.3,android-28,extra-android-m2repository,platform-tools
 addons:
   apt:
     packages:
       - autoconf
       - pkg-config
       - libtool
+      - ninja-build
+      - python3-pip
+      - python3-setuptools
 
 before_install:
-  - sdkmanager "platforms;android-28"
+  - sudo pip3 install meson
   - buildscripts/.travis.sh install
 script:
   - buildscripts/.travis.sh build
+
+before_cache:
+  - find $HOME/.gradle/caches -maxdepth 3 -name '*.lock' -delete
+  - rm -rf $HOME/.gradle/caches/journal-1/
+cache:
+  directories:
+    - $HOME/.gradle/caches/
+    - $HOME/.gradle/wrapper/

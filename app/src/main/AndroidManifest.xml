@@ -48,12 +48,14 @@
                 <data android:scheme="tcp" />
                 <data android:scheme="udp" />
             </intent-filter>
-            <intent-filter> <!-- MIME type only (e.g. Google Drive) -->
+            <intent-filter> <!-- Local files with MIME type (e.g. Google Drive) -->
                 <action android:name="android.intent.action.VIEW" />
 
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
 
+                <data android:scheme="content" />
+                <data android:scheme="file" />
                 <data android:mimeType="video/*" />
                 <data android:mimeType="audio/*" />
             </intent-filter>
@@ -145,6 +147,11 @@
                 <data android:pathPattern=".*\\..*\\..*\\..*\\..*\\..*\\.m3u8*" />
                 <data android:pathPattern=".*\\..*\\..*\\..*\\..*\\..*\\..*\\.m3u8*" />
             </intent-filter>
+            <intent-filter> <!-- Share action -->
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
         </activity>
         <activity
             android:name=".MainActivity"
@@ -157,6 +164,12 @@
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity
+            android:name=".FilePickerActivity"
+            android:configChanges="orientation|screenSize"
+            android:screenOrientation="behind"
+            android:theme="@style/FilePickerDialogTheme"
+            android:exported="false" />
         <activity
             android:name=".SettingsActivity"
             android:label="@string/title_activity_settings" />
